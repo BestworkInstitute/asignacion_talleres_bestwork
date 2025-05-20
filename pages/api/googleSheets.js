@@ -6,7 +6,9 @@ const SPREADSHEET_ID = '178Bzvl7PUwHMr8xgCJ8o5ma25f3UGN49JBkYDKkJ6UM';
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { talleresAsignados, disponibilidadFinal, profesores } = req.body;
+ 
+const { talleresAsignados, disponibilidadFinal, profesores } = req.body;
+
 
   const auth = new google.auth.GoogleAuth({
     credentials: {
