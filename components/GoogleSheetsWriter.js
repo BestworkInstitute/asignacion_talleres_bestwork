@@ -1,25 +1,24 @@
 import { useEffect } from 'react';
 
-export default function GoogleSheetsWriter({ talleresAsignados, disponibilidadFinal }) {
+export default function GoogleSheetsWriter({ talleresAsignados, disponibilidadFinal, profesores }) {
   useEffect(() => {
-    const sendData = async () => {
+    const uploadToSheets = async () => {
       try {
-        const res = await fetch('/api/googleSheets', {
+        const response = await fetch('/api/googleSheets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ talleresAsignados, disponibilidadFinal }),
+          body: JSON.stringify({ talleresAsignados, disponibilidadFinal, profesores }),
         });
-        const result = await res.json();
-        console.log('✅ Datos enviados a Google Sheets:', result);
+
+        const result = await response.json();
+        console.log('✅ Google Sheets actualizado:', result);
       } catch (err) {
-        console.error('❌ Error al enviar a Google Sheets:', err);
+        console.error('❌ Error al subir a Google Sheets:', err);
       }
     };
 
-    if (talleresAsignados.length > 0 && disponibilidadFinal.length > 0) {
-      sendData();
-    }
-  }, [talleresAsignados, disponibilidadFinal]);
+    uploadToSheets();
+  }, [talleresAsignados, disponibilidadFinal, profesores]);
 
   return null;
 }

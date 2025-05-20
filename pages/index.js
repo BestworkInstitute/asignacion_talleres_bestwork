@@ -4,13 +4,13 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { asignarProfesores } from '../utils/asignador';
-import EnviarHorarios from '../components/EnviarHorarios';
 import GoogleSheetsWriter from '../components/GoogleSheetsWriter';
 
 export default function Home() {
   const [profesores, setProfesores] = useState([]);
   const [talleresOriginales, setTalleresOriginales] = useState([]);
   const [talleresAsignados, setTalleresAsignados] = useState([]);
+  const [fechaLimiteConfirmacion, setFechaLimiteConfirmacion] = useState('');
 
   useEffect(() => {
     if (profesores.length > 0 && talleresOriginales.length > 0) {
@@ -20,7 +20,9 @@ export default function Home() {
   }, [profesores, talleresOriginales]);
 
   const leerArchivoProfesores = async (e) => {
-    const file = e.target.files[0];
+    const file = e.target?.files?.[0];
+    if (!file) return alert('Archivo de profesores no válido');
+
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -29,8 +31,12 @@ export default function Home() {
     const parsed = rows.map(r => ({
       nombre: r[0],
       bloquesDisponibles: typeof r[1] === 'string' ? r[1].split(', ') : [],
-      bloquesAsignados: parseInt(r[2], 10) || 0,
+      bloquesAsignados: parseFloat(r[2]) || 0,
+      categoria: r[3],
       correo: typeof r[4] === 'string' ? r[4].trim() : '',
+      clave: typeof r[5] === 'string' ? r[5].trim() : '',
+      ponderacion: r[6],
+      celular: r[7] ? String(r[7]).trim() : '',
       asignados: 0,
     }));
 
@@ -38,18 +44,22 @@ export default function Home() {
   };
 
   const leerArchivoBloques = async (e) => {
-    const file = e.target.files[0];
+    const file = e.target?.files?.[0];
+    if (!file) return alert('Archivo de talleres no válido');
+
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }).slice(1);
+
     const parsed = rows.map(r => ({
       bloque: r[0],
       curso: r[1],
       dia: r[2],
       idBloque: r[3],
-      profesorAsignado: null
+      profesorAsignado: null,
     }));
+
     setTalleresOriginales(parsed);
   };
 
@@ -73,12 +83,6 @@ export default function Home() {
       startY: 35,
       head: [['Nombre', 'Bloques Asignados', 'Bloques Disponibles']],
       body: profesores.map(p => [p.nombre, p.bloquesAsignados, p.bloquesDisponibles.join(', ')]),
-    });
-
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 10,
-      head: [['Curso', 'ID Bloque']],
-      body: talleresOriginales.map(t => [t.curso, t.idBloque]),
     });
 
     autoTable(doc, {
@@ -116,26 +120,62 @@ export default function Home() {
       ]),
     });
 
-    const resumenDetalle = {};
-    talleresAsignados.forEach(t => {
-      if (!t.profesorAsignado) return;
-      if (!resumenDetalle[t.profesorAsignado]) {
-        resumenDetalle[t.profesorAsignado] = [];
-      }
-      resumenDetalle[t.profesorAsignado].push(`${t.dia} ${t.bloque} ${t.curso}`);
-    });
-
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 10,
-      head: [['Profesor', 'Cantidad de Bloques Asignados', 'Bloques']],
-      body: Object.entries(resumenDetalle).map(([prof, bloques]) => [
-        prof,
-        bloques.length,
-        bloques.join(' | ')
-      ])
-    });
-
     doc.save('informe_asignacion_profesores.pdf');
+  };
+
+  const enviarMensajesFlow = async () => {
+    if (!fechaLimiteConfirmacion) {
+      alert('⚠️ Debes ingresar la fecha límite de confirmación antes de enviar.');
+      return;
+    }
+
+    const fechaTexto = new Date(fechaLimiteConfirmacion).toLocaleString('es-CL');
+
+    const profesoresConAsignacion = profesores.filter(p =>
+      talleresAsignados.some(t => t.profesorAsignado === p.nombre)
+    );
+
+    for (const prof of profesoresConAsignacion) {
+      if (!prof.celular || prof.celular.length < 8) {
+        console.warn(`⚠️ Profesor sin celular válido: ${prof.nombre}`);
+        continue;
+      }
+
+      const celularFormateado = prof.celular.startsWith('56')
+        ? prof.celular
+        : '56' + prof.celular.replace(/^0/, '').replace(/\s+/g, '');
+
+      const payload = {
+        NOMBREPROFESOR: prof.nombre,
+        TELEFONOPROFESOR: celularFormateado,
+        FECHA: fechaTexto
+      };
+
+      try {
+        const response = await fetch(
+          'https://flows.messagebird.com/flows/4fecefd6-1c98-4195-8cff-1fbfcee3e0bb/invoke',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }
+        );
+
+        const text = await response.text();
+        let result = {};
+        try {
+          result = text ? JSON.parse(text) : {};
+        } catch {
+          console.warn(`⚠️ La respuesta no es JSON para ${prof.nombre}:`, text);
+        }
+
+        console.log(`📲 Mensaje enviado a ${prof.nombre}`, result);
+      } catch (err) {
+        console.error(`❌ Error al enviar mensaje a ${prof.nombre}`, err);
+      }
+    }
+
+    alert('✅ Todos los mensajes fueron enviados');
   };
 
   const renderDisponibilidadFinal = () => {
@@ -180,17 +220,10 @@ export default function Home() {
       </section>
 
       {profesores.length > 0 && renderTable(
-        'Tabla de Profesores (DIM_PROFESORES)',
+        'Disponibilidad de profesores',
         ['Nombre', 'Bloques Asignados', 'Bloques Disponibles'],
         profesores.map(p => [p.nombre, p.bloquesAsignados, p.bloquesDisponibles.join(', ')]),
         () => exportToExcel(profesores, 'profesores.xlsx')
-      )}
-
-      {talleresOriginales.length > 0 && renderTable(
-        'Tabla de Talleres Originales (TH_TALLERES)',
-        ['Bloque', 'Curso', 'Día', 'ID Bloque'],
-        talleresOriginales.map(t => [t.bloque, t.curso, t.dia, t.idBloque]),
-        () => exportToExcel(talleresOriginales, 'bloques.xlsx')
       )}
 
       {talleresAsignados.length > 0 && renderTable(
@@ -200,7 +233,6 @@ export default function Home() {
         () => exportToExcel(talleresAsignados, 'talleres_asignados.xlsx')
       )}
 
-      {/* ENVIAR A GOOGLE SHEETS */}
       {talleresAsignados.length > 0 && (
         <GoogleSheetsWriter
           talleresAsignados={talleresAsignados}
@@ -211,17 +243,32 @@ export default function Home() {
             const disponibles = p.bloquesDisponibles.filter(b => !bloquesAsignados.includes(b));
             return [p.nombre, disponibles.join(', ')];
           })}
+          profesores={profesores}
         />
       )}
 
-      {/* RESUMENES */}
       {talleresAsignados.length > 0 && renderDisponibilidadFinal()}
 
       {talleresAsignados.length > 0 && (
-        <EnviarHorarios
-          profesores={profesores}
-          talleresAsignados={talleresAsignados}
-        />
+        <div style={{ textAlign: 'center', marginTop: '2rem' }}>
+          <label><strong>Fecha límite de confirmación:</strong></label><br />
+          <input
+            type="datetime-local"
+            value={fechaLimiteConfirmacion}
+            onChange={(e) => setFechaLimiteConfirmacion(e.target.value)}
+            style={{
+              marginBottom: '1rem',
+              padding: '8px',
+              borderRadius: '5px',
+              border: '1px solid #ccc',
+              fontSize: '14px'
+            }}
+          />
+          <br />
+          <button onClick={enviarMensajesFlow} style={styles.buttonFlow}>
+            🚀 Enviar vía Flow (SMS)
+          </button>
+        </div>
       )}
 
       {talleresAsignados.length > 0 && (
@@ -255,6 +302,15 @@ const styles = {
   },
   buttonPDF: {
     backgroundColor: '#6c63ff',
+    color: '#fff',
+    padding: '12px 24px',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '16px',
+    cursor: 'pointer',
+  },
+  buttonFlow: {
+    backgroundColor: '#28a745',
     color: '#fff',
     padding: '12px 24px',
     border: 'none',
