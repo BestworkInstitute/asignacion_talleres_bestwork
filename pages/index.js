@@ -177,8 +177,11 @@ export default function Home() {
         const text = await response.text();
         console.log(`📲 Mensaje enviado a ${prof.nombre}`, text);
       } catch (err) {
-        console.error(`❌ Error al enviar mensaje a ${prof.nombre}`, err);
-      }
+  console.error('Error al enviar confirmación:', err);
+  alert('🚨 Error de conexión');
+  setEstadoEnvio(null);
+}
+
     }
 
     // ⬇️ Google Sheets solo después del envío
