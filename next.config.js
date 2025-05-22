@@ -1,12 +1,14 @@
-// next.config.js
+// Configuración de Next.js 🚀
+
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  eslint: {
-    // ✅ Evita que errores como variables no usadas rompan el build
-    ignoreDuringBuilds: true,
+  swcMinify: true,
+  images: {
+    domains: ['res.cloudinary.com', 'localhost'],
   },
   experimental: {
-    turbo: {},
+    serverActions: true,
   },
 };
 

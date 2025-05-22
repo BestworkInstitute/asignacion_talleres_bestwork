@@ -1,16 +1,21 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
+// Configuración moderna ESLint con ESM 🔍
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import eslintPluginNext from 'eslint-plugin-next';
+import eslintPluginReact from 'eslint-plugin-react';
+import eslintPluginJsxA11y from 'eslint-plugin-jsx-a11y';
 
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
-
-const eslintConfig = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+export default [
+  {
+    files: ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx'],
+    plugins: {
+      next: eslintPluginNext,
+      react: eslintPluginReact,
+      jsxA11y: eslintPluginJsxA11y,
+    },
+    rules: {
+      'react/react-in-jsx-scope': 'off', // Next.js no lo necesita
+      'jsx-a11y/alt-text': 'warn',
+      'next/no-img-element': 'warn',
+    },
+  },
 ];
-
-export default eslintConfig;
