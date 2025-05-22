@@ -1,19 +1,22 @@
+// /pages/index.js
 import { useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import RenderTable from '../components/RenderTable';
+import enviarAGoogleSheets from '../components/GoogleSheetsWriter';
 import { asignarProfesores } from '../utils/asignador';
-import GoogleSheetsWriter from '../components/GoogleSheetsWriter';
 
 export default function Home() {
   const [profesores, setProfesores] = useState([]);
   const [talleresOriginales, setTalleresOriginales] = useState([]);
   const [talleresAsignados, setTalleresAsignados] = useState([]);
   const [fechaLimiteConfirmacion, setFechaLimiteConfirmacion] = useState('');
+  const [mensajeEnviado, setMensajeEnviado] = useState(false);
 
   useEffect(() => {
-    if (profesores.length > 0 && talleresOriginales.length > 0) {
+    if (profesores.length && talleresOriginales.length) {
       const asignados = asignarProfesores(profesores, talleresOriginales);
       setTalleresAsignados(asignados);
     }
@@ -52,13 +55,15 @@ export default function Home() {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }).slice(1);
 
-    const parsed = rows.map(r => ({
-      bloque: r[0],
-      curso: r[1],
-      dia: r[2],
-      idBloque: r[3],
-      profesorAsignado: null,
-    }));
+      const parsed = rows.map(r => ({
+    bloque: r[0],
+    curso: r[1],
+    dia: r[2],
+    idBloque: r[3],
+    cuenta: r[4] || '', // 👈 nueva columna CUENTA
+    profesorAsignado: null,
+  }));
+
 
     setTalleresOriginales(parsed);
   };
@@ -123,9 +128,17 @@ export default function Home() {
     doc.save('informe_asignacion_profesores.pdf');
   };
 
+  const disponibilidadFinal = profesores.map(p => {
+    const bloquesAsignados = talleresAsignados
+      .filter(t => t.profesorAsignado === p.nombre)
+      .map(t => t.idBloque);
+    const disponiblesFinal = p.bloquesDisponibles.filter(b => !bloquesAsignados.includes(b));
+    return [p.nombre, disponiblesFinal.join(', ')];
+  });
+
   const enviarMensajesFlow = async () => {
     if (!fechaLimiteConfirmacion) {
-      alert('⚠️ Debes ingresar la fecha límite de confirmación antes de enviar.');
+      alert('⚠️ Debes ingresar la fecha límite de confirmación.');
       return;
     }
 
@@ -162,43 +175,20 @@ export default function Home() {
         );
 
         const text = await response.text();
-        let result = {};
-        try {
-          result = text ? JSON.parse(text) : {};
-        } catch {
-          console.warn(`⚠️ La respuesta no es JSON para ${prof.nombre}:`, text);
-        }
-
-        console.log(`📲 Mensaje enviado a ${prof.nombre}`, result);
+        console.log(`📲 Mensaje enviado a ${prof.nombre}`, text);
       } catch (err) {
         console.error(`❌ Error al enviar mensaje a ${prof.nombre}`, err);
       }
     }
 
-    alert('✅ Todos los mensajes fueron enviados');
-  };
-
-  const renderDisponibilidadFinal = () => {
-    const disponibilidadFinal = profesores.map(p => {
-      const bloquesAsignados = talleresAsignados
-        .filter(t => t.profesorAsignado === p.nombre)
-        .map(t => t.idBloque);
-      const disponiblesFinal = p.bloquesDisponibles.filter(b => !bloquesAsignados.includes(b));
-      return [p.nombre, disponiblesFinal.join(', ')];
-    });
-
-    return renderTable(
-      'Disponibilidad Final de Profesores',
-      ['Profesor', 'Bloques Disponibles Restantes'],
-      disponibilidadFinal,
-      () => {
-        const dataExcel = disponibilidadFinal.map(([nombre, disponibles]) => ({
-          Profesor: nombre,
-          DisponiblesFinales: disponibles
-        }));
-        exportToExcel(dataExcel, 'disponibilidad_final.xlsx');
-      }
-    );
+    // ⬇️ Google Sheets solo después del envío
+    try {
+      await enviarAGoogleSheets({ talleresAsignados, disponibilidadFinal, profesores });
+      alert('✅ Mensajes enviados y datos subidos a Google Sheets');
+      setMensajeEnviado(true);
+    } catch (err) {
+      alert('❌ Fallo la actualización de Google Sheets');
+    }
   };
 
   return (
@@ -219,35 +209,37 @@ export default function Home() {
         <input type="file" accept=".xlsx,.csv" onChange={leerArchivoBloques} style={styles.upload} />
       </section>
 
-      {profesores.length > 0 && renderTable(
-        'Disponibilidad de profesores',
-        ['Nombre', 'Bloques Asignados', 'Bloques Disponibles'],
-        profesores.map(p => [p.nombre, p.bloquesAsignados, p.bloquesDisponibles.join(', ')]),
-        () => exportToExcel(profesores, 'profesores.xlsx')
-      )}
-
-      {talleresAsignados.length > 0 && renderTable(
-        'Talleres con Profesor Asignado',
-        ['Bloque', 'Curso', 'Día', 'ID Bloque', 'Profesor Asignado'],
-        talleresAsignados.map(t => [t.bloque, t.curso, t.dia, t.idBloque, t.profesorAsignado || '—']),
-        () => exportToExcel(talleresAsignados, 'talleres_asignados.xlsx')
-      )}
-
-      {talleresAsignados.length > 0 && (
-        <GoogleSheetsWriter
-          talleresAsignados={talleresAsignados}
-          disponibilidadFinal={profesores.map(p => {
-            const bloquesAsignados = talleresAsignados
-              .filter(t => t.profesorAsignado === p.nombre)
-              .map(t => t.idBloque);
-            const disponibles = p.bloquesDisponibles.filter(b => !bloquesAsignados.includes(b));
-            return [p.nombre, disponibles.join(', ')];
-          })}
-          profesores={profesores}
+      {profesores.length > 0 && (
+        <RenderTable
+          title="Disponibilidad de Profesores"
+          headers={['Nombre', 'Bloques Asignados', 'Bloques Disponibles']}
+          rows={profesores.map(p => [p.nombre, p.bloquesAsignados, p.bloquesDisponibles.join(', ')])}
+          onDownload={() => exportToExcel(profesores, 'profesores.xlsx')}
         />
       )}
 
-      {talleresAsignados.length > 0 && renderDisponibilidadFinal()}
+      {talleresAsignados.length > 0 && (
+        <RenderTable
+          title="Talleres con Profesor Asignado"
+          headers={['Bloque', 'Curso', 'Día', 'ID Bloque', 'Profesor Asignado']}
+          rows={talleresAsignados.map(t => [t.bloque, t.curso, t.dia, t.idBloque, t.profesorAsignado || '—'])}
+          onDownload={() => exportToExcel(talleresAsignados, 'talleres_asignados.xlsx')}
+        />
+      )}
+
+      {talleresAsignados.length > 0 && (
+        <RenderTable
+          title="Disponibilidad Final de Profesores"
+          headers={['Profesor', 'Bloques Disponibles Restantes']}
+          rows={disponibilidadFinal}
+          onDownload={() =>
+            exportToExcel(disponibilidadFinal.map(([nombre, disponibles]) => ({
+              Profesor: nombre,
+              DisponiblesFinales: disponibles
+            })), 'disponibilidad_final.xlsx')
+          }
+        />
+      )}
 
       {talleresAsignados.length > 0 && (
         <div style={{ textAlign: 'center', marginTop: '2rem' }}>
@@ -256,28 +248,57 @@ export default function Home() {
             type="datetime-local"
             value={fechaLimiteConfirmacion}
             onChange={(e) => setFechaLimiteConfirmacion(e.target.value)}
-            style={{
-              marginBottom: '1rem',
-              padding: '8px',
-              borderRadius: '5px',
-              border: '1px solid #ccc',
-              fontSize: '14px'
-            }}
+            style={styles.input}
           />
           <br />
           <button onClick={enviarMensajesFlow} style={styles.buttonFlow}>
-            🚀 Enviar vía Flow (SMS)
+            🚀 Enviar vía Flow (SMS) y subir a Google Sheets
           </button>
         </div>
       )}
 
-      {talleresAsignados.length > 0 && (
+      {mensajeEnviado && (
         <div style={{ textAlign: 'center', marginTop: '2rem' }}>
           <button onClick={generarInformePDF} style={styles.buttonPDF}>
             📄 Descargar Informe PDF
           </button>
         </div>
+        
       )}
+      {profesores.length > 0 && talleresAsignados.length > 0 && (
+  <section style={{ marginTop: '3rem', padding: '1rem', background: '#fffbe6', borderRadius: '8px' }}>
+    <h2>📊 Métricas de Asignación</h2>
+    <p><strong>Profesores con al menos un taller asignado:</strong> {
+      profesores.filter(p => talleresAsignados.some(t => t.profesorAsignado === p.nombre)).length
+    }</p>
+    <p><strong>Profesores sin talleres asignados:</strong> {
+      profesores.filter(p => !talleresAsignados.some(t => t.profesorAsignado === p.nombre)).length
+    }</p>
+
+    <table border="1" cellPadding="8" style={{ width: '100%', marginTop: '1rem', borderCollapse: 'collapse' }}>
+      <thead style={{ background: '#ffe08a' }}>
+        <tr>
+          <th>Profesor</th>
+          <th>Talleres Esperados</th>
+          <th>Talleres Asignados</th>
+        </tr>
+      </thead>
+      <tbody>
+        {profesores.map(p => {
+          const asignados = talleresAsignados.filter(t => t.profesorAsignado === p.nombre).length;
+          return (
+            <tr key={p.nombre}>
+              <td>{p.nombre}</td>
+              <td>{p.bloquesAsignados}</td>
+              <td>{asignados}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </section>
+)}
+
     </div>
   );
 }
@@ -290,24 +311,12 @@ const styles = {
     marginBottom: '1rem',
     marginTop: '0.5rem',
   },
-  buttonExport: {
-    backgroundColor: '#007bff',
-    color: '#fff',
-    padding: '8px 16px',
-    border: 'none',
+  input: {
+    marginBottom: '1rem',
+    padding: '8px',
     borderRadius: '5px',
-    fontSize: '14px',
-    cursor: 'pointer',
-    marginTop: '0.5rem'
-  },
-  buttonPDF: {
-    backgroundColor: '#6c63ff',
-    color: '#fff',
-    padding: '12px 24px',
-    border: 'none',
-    borderRadius: '6px',
-    fontSize: '16px',
-    cursor: 'pointer',
+    border: '1px solid #ccc',
+    fontSize: '14px'
   },
   buttonFlow: {
     backgroundColor: '#28a745',
@@ -317,28 +326,14 @@ const styles = {
     borderRadius: '6px',
     fontSize: '16px',
     cursor: 'pointer',
+  },
+  buttonPDF: {
+    backgroundColor: '#6c63ff',
+    color: '#fff',
+    padding: '12px 24px',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '16px',
+    cursor: 'pointer',
   }
 };
-
-function renderTable(title, headers, rows, onDownload) {
-  return (
-    <section style={{ marginTop: '2rem' }}>
-      <h2>{title}</h2>
-      <table border="1" cellPadding="8" style={{ width: '100%', borderCollapse: 'collapse', background: '#fff' }}>
-        <thead style={{ background: '#d6e4f0' }}>
-          <tr>{headers.map((h, i) => <th key={i}>{h}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((r, ri) => (
-            <tr key={ri}>
-              {r.map((cell, ci) => <td key={ci}>{cell}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={{ marginTop: '1rem' }}>
-        <button style={styles.buttonExport} onClick={onDownload}>⬇️ Descargar</button>
-      </div>
-    </section>
-  );
-}

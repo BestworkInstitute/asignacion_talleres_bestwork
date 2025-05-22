@@ -2,12 +2,12 @@
   "name": "asignacion_profesores_bw",
   "version": "0.1.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build && npm run lint",
-    "start": "next start",
-    "lint": "next lint --max-warnings=0"
-  },
+ "scripts": {
+  "dev": "next dev",
+  "build": "next build && npm run lint",
+  "start": "next start",
+  "lint": "next lint --max-warnings=0"
+},
   "dependencies": {
     "date-fns": "^4.1.0",
     "file-saver": "^2.0.5",

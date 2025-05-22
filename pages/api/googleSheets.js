@@ -1,3 +1,4 @@
+// /pages/api/googleSheets.js
 import { google } from 'googleapis';
 
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
@@ -6,12 +7,12 @@ const SPREADSHEET_ID = '178Bzvl7PUwHMr8xgCJ8o5ma25f3UGN49JBkYDKkJ6UM';
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { talleresAsignados, profesores } = req.body; // 🔥 FIX: sin disponibilidadFinal
+  const { talleresAsignados, profesores } = req.body;
 
   const auth = new google.auth.GoogleAuth({
     credentials: {
       client_email: process.env.GOOGLE_CLIENT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'), // 🔐 FIX: safe optional chaining
+      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
     },
     scopes: SCOPES,
   });
@@ -19,21 +20,27 @@ export default async function handler(req, res) {
   const sheets = google.sheets({ version: 'v4', auth });
 
   try {
-    // Limpiar hoja
+    // Limpiar hoja principal
     await sheets.spreadsheets.values.clear({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'TALLERES ASIGNADOS PROFESORES!A:D',
+      range: 'TALLERES ASIGNADOS PROFESORES!A:G',
     });
 
+    // Escribir hoja principal con CUENTA + CLAVE PROFESOR
     const talleresValues = [
-      ['Bloque', 'Curso', 'Día', 'ID Bloque', 'Profesor Asignado'],
-      ...talleresAsignados.map(t => [
-        t.bloque,
-        t.curso,
-        t.dia,
-        t.idBloque,
-        t.profesorAsignado || '—'
-      ]),
+      ['Bloque', 'Curso', 'Día', 'ID Bloque', 'CUENTA', 'Profesor Asignado', 'CLAVE PROFESOR'],
+      ...talleresAsignados.map(t => {
+        const prof = profesores.find(p => p.nombre === t.profesorAsignado);
+        return [
+          t.bloque,
+          t.curso,
+          t.dia,
+          t.idBloque,
+          t.cuenta || '',
+          t.profesorAsignado || '—',
+          prof?.clave || ''
+        ];
+      }),
     ];
 
     await sheets.spreadsheets.values.update({
@@ -43,7 +50,7 @@ export default async function handler(req, res) {
       requestBody: { values: talleresValues },
     });
 
-    // Histórico
+    // Escribir en hoja HISTÓRICO
     const fechaHora = new Date().toLocaleString('es-CL');
     const historicoValues = talleresAsignados.map(t => {
       const prof = profesores.find(p => p.nombre === t.profesorAsignado);
@@ -53,6 +60,7 @@ export default async function handler(req, res) {
         t.curso,
         t.dia,
         t.idBloque,
+        t.cuenta || '',
         t.profesorAsignado || '',
         prof?.clave || '',
         ''
