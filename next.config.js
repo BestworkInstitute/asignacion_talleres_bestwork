@@ -1,13 +1,10 @@
 // next.config.js
 const nextConfig = {
   reactStrictMode: true,
-
-  // 🔐 Esto evita que errores de ESLint detengan la build en Vercel
   eslint: {
+    // ✅ Evita que errores como variables no usadas rompan el build
     ignoreDuringBuilds: true,
   },
-
-  // ⚡ Habilita Turbopack correctamente en Next.js 15
   experimental: {
     turbo: {},
   },

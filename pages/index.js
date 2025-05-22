@@ -1,4 +1,3 @@
-// /pages/index.js
 import { useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -7,6 +6,7 @@ import autoTable from 'jspdf-autotable';
 import RenderTable from '../components/RenderTable';
 import enviarAGoogleSheets from '../components/GoogleSheetsWriter';
 import { asignarProfesores } from '../utils/asignador';
+import Image from 'next/image';
 
 export default function Home() {
   const [profesores, setProfesores] = useState([]);
@@ -55,15 +55,14 @@ export default function Home() {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }).slice(1);
 
-      const parsed = rows.map(r => ({
-    bloque: r[0],
-    curso: r[1],
-    dia: r[2],
-    idBloque: r[3],
-    cuenta: r[4] || '', // 👈 nueva columna CUENTA
-    profesorAsignado: null,
-  }));
-
+    const parsed = rows.map(r => ({
+      bloque: r[0],
+      curso: r[1],
+      dia: r[2],
+      idBloque: r[3],
+      cuenta: r[4] || '',
+      profesorAsignado: null,
+    }));
 
     setTalleresOriginales(parsed);
   };
@@ -71,14 +70,13 @@ export default function Home() {
   const exportToExcel = (data, filename) => {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Datos");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    saveAs(new Blob([excelBuffer], { type: "application/octet-stream" }), filename);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Datos');
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([excelBuffer], { type: 'application/octet-stream' }), filename);
   };
 
   const generarInformePDF = () => {
     const doc = new jsPDF();
-
     doc.setFontSize(18);
     doc.text('Bestwork - Asignación de Talleres', 14, 20);
     doc.setFontSize(10);
@@ -87,51 +85,20 @@ export default function Home() {
     autoTable(doc, {
       startY: 35,
       head: [['Nombre', 'Bloques Asignados', 'Bloques Disponibles']],
-      body: profesores.map(p => [p.nombre, p.bloquesAsignados, p.bloquesDisponibles.join(', ')]),
+      body: profesores.map(p => [p.nombre, p.bloquesAsignados, p.bloquesDisponibles.join(', ')])
     });
 
     autoTable(doc, {
       startY: doc.lastAutoTable.finalY + 10,
-      head: [['Curso', 'ID Bloque', 'Profesor Asignado']],
-      body: talleresAsignados.map(t => [t.curso, t.idBloque, t.profesorAsignado || '—']),
-    });
-
-    const resumen = {};
-    talleresAsignados.forEach(t => {
-      if (!t.profesorAsignado) return;
-      if (!resumen[t.profesorAsignado]) {
-        const prof = profesores.find(p => p.nombre === t.profesorAsignado);
-        resumen[t.profesorAsignado] = {
-          esperados: prof?.bloquesAsignados || 0,
-          asignados: 0,
-          bloques: new Set(),
-          cursos: new Set()
-        };
-      }
-      resumen[t.profesorAsignado].asignados++;
-      resumen[t.profesorAsignado].bloques.add(t.idBloque);
-      resumen[t.profesorAsignado].cursos.add(t.curso);
-    });
-
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 10,
-      head: [['Profesor', 'Bloques Esperados', 'Asignados', 'Bloques', 'Cursos']],
-      body: Object.entries(resumen).map(([n, d]) => [
-        n,
-        d.esperados,
-        d.asignados,
-        [...d.bloques].join(', '),
-        [...d.cursos].join(', ')
-      ]),
+      head: [['Curso', 'ID Bloque', 'Cuenta', 'Profesor Asignado']],
+      body: talleresAsignados.map(t => [t.curso, t.idBloque, t.cuenta || '', t.profesorAsignado || '—'])
     });
 
     doc.save('informe_asignacion_profesores.pdf');
   };
 
   const disponibilidadFinal = profesores.map(p => {
-    const bloquesAsignados = talleresAsignados
-      .filter(t => t.profesorAsignado === p.nombre)
-      .map(t => t.idBloque);
+    const bloquesAsignados = talleresAsignados.filter(t => t.profesorAsignado === p.nombre).map(t => t.idBloque);
     const disponiblesFinal = p.bloquesDisponibles.filter(b => !bloquesAsignados.includes(b));
     return [p.nombre, disponiblesFinal.join(', ')];
   });
@@ -176,28 +143,31 @@ export default function Home() {
 
         const text = await response.text();
         console.log(`📲 Mensaje enviado a ${prof.nombre}`, text);
-      } catch (err) {
-  console.error('Error al enviar confirmación:', err);
-  alert('🚨 Error de conexión');
-  setEstadoEnvio(null);
-}
-
+      } catch (error) {
+        console.error('❌ Error al enviar mensaje:', error);
+        alert('🚨 Error de conexión');
+      }
     }
 
-    // ⬇️ Google Sheets solo después del envío
+    // Subida a Google Sheets luego del envío
     try {
       await enviarAGoogleSheets({ talleresAsignados, disponibilidadFinal, profesores });
       alert('✅ Mensajes enviados y datos subidos a Google Sheets');
       setMensajeEnviado(true);
-    } catch (err) {
-      alert('❌ Fallo la actualización de Google Sheets');
+    } catch (error) {
+      alert('🚨 Error de conexión con Google Sheets');
     }
   };
 
   return (
     <div style={{ padding: '2rem', fontFamily: 'Segoe UI', background: '#f4f6f8' }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <img src="https://bestwork.cl/wp-content/uploads/2023/05/Logo.png" alt="Bestwork" height="80" />
+        <Image
+          src="https://bestwork.cl/wp-content/uploads/2023/05/Logo.png"
+          alt="Bestwork"
+          width={160}
+          height={80}
+        />
       </div>
 
       <h1 style={{ textAlign: 'center', marginBottom: '2rem' }}>Asignación de Talleres</h1>
@@ -224,8 +194,8 @@ export default function Home() {
       {talleresAsignados.length > 0 && (
         <RenderTable
           title="Talleres con Profesor Asignado"
-          headers={['Bloque', 'Curso', 'Día', 'ID Bloque', 'Profesor Asignado']}
-          rows={talleresAsignados.map(t => [t.bloque, t.curso, t.dia, t.idBloque, t.profesorAsignado || '—'])}
+          headers={['Bloque', 'Curso', 'Día', 'ID Bloque', 'Cuenta', 'Profesor Asignado']}
+          rows={talleresAsignados.map(t => [t.bloque, t.curso, t.dia, t.idBloque, t.cuenta || '', t.profesorAsignado || '—'])}
           onDownload={() => exportToExcel(talleresAsignados, 'talleres_asignados.xlsx')}
         />
       )}
@@ -236,10 +206,13 @@ export default function Home() {
           headers={['Profesor', 'Bloques Disponibles Restantes']}
           rows={disponibilidadFinal}
           onDownload={() =>
-            exportToExcel(disponibilidadFinal.map(([nombre, disponibles]) => ({
-              Profesor: nombre,
-              DisponiblesFinales: disponibles
-            })), 'disponibilidad_final.xlsx')
+            exportToExcel(
+              disponibilidadFinal.map(([nombre, disponibles]) => ({
+                Profesor: nombre,
+                DisponiblesFinales: disponibles
+              })),
+              'disponibilidad_final.xlsx'
+            )
           }
         />
       )}
@@ -266,42 +239,41 @@ export default function Home() {
             📄 Descargar Informe PDF
           </button>
         </div>
-        
       )}
+
       {profesores.length > 0 && talleresAsignados.length > 0 && (
-  <section style={{ marginTop: '3rem', padding: '1rem', background: '#fffbe6', borderRadius: '8px' }}>
-    <h2>📊 Métricas de Asignación</h2>
-    <p><strong>Profesores con al menos un taller asignado:</strong> {
-      profesores.filter(p => talleresAsignados.some(t => t.profesorAsignado === p.nombre)).length
-    }</p>
-    <p><strong>Profesores sin talleres asignados:</strong> {
-      profesores.filter(p => !talleresAsignados.some(t => t.profesorAsignado === p.nombre)).length
-    }</p>
+        <section style={{ marginTop: '3rem', padding: '1rem', background: '#fffbe6', borderRadius: '8px' }}>
+          <h2>📊 Métricas de Asignación</h2>
+          <p><strong>Profesores con al menos un taller asignado:</strong> {
+            profesores.filter(p => talleresAsignados.some(t => t.profesorAsignado === p.nombre)).length
+          }</p>
+          <p><strong>Profesores sin talleres asignados:</strong> {
+            profesores.filter(p => !talleresAsignados.some(t => t.profesorAsignado === p.nombre)).length
+          }</p>
 
-    <table border="1" cellPadding="8" style={{ width: '100%', marginTop: '1rem', borderCollapse: 'collapse' }}>
-      <thead style={{ background: '#ffe08a' }}>
-        <tr>
-          <th>Profesor</th>
-          <th>Talleres Esperados</th>
-          <th>Talleres Asignados</th>
-        </tr>
-      </thead>
-      <tbody>
-        {profesores.map(p => {
-          const asignados = talleresAsignados.filter(t => t.profesorAsignado === p.nombre).length;
-          return (
-            <tr key={p.nombre}>
-              <td>{p.nombre}</td>
-              <td>{p.bloquesAsignados}</td>
-              <td>{asignados}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  </section>
-)}
-
+          <table border="1" cellPadding="8" style={{ width: '100%', marginTop: '1rem', borderCollapse: 'collapse' }}>
+            <thead style={{ background: '#ffe08a' }}>
+              <tr>
+                <th>Profesor</th>
+                <th>Talleres Esperados</th>
+                <th>Talleres Asignados</th>
+              </tr>
+            </thead>
+            <tbody>
+              {profesores.map(p => {
+                const asignados = talleresAsignados.filter(t => t.profesorAsignado === p.nombre).length;
+                return (
+                  <tr key={p.nombre}>
+                    <td>{p.nombre}</td>
+                    <td>{p.bloquesAsignados}</td>
+                    <td>{asignados}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      )}
     </div>
   );
 }
